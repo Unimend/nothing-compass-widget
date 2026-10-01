@@ -15,7 +15,7 @@
 
 ## 🖼️ 预览
 
-<video src="preview.mp4" controls width="320"></video>
+![组件演示](preview.gif)
 
 ```
         N
