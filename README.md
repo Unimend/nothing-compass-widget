@@ -15,6 +15,8 @@
 
 ## 🖼️ 预览
 
+<video src="preview.mp4" controls width="320"></video>
+
 ```
         N
    W    ▲    E
