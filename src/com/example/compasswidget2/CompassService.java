@@ -246,16 +246,26 @@ public class CompassService extends Service implements SensorEventListener {
         labelPaint.setTextAlign(Paint.Align.CENTER);
         labelPaint.setAntiAlias(true);
 
-        // 测量大写字母字形高度（cap height）：drawText 的 y 是基线、字形向上延伸，
-        // 所以顶部标签 N 要额外下移一个 cap height，才能让 N/S 的「字形边缘」距边缘相等
-        android.graphics.Rect capBounds = new android.graphics.Rect();
-        labelPaint.getTextBounds("N", 0, 1, capBounds);
-        float capHeight = -capBounds.top;
+        // 测量各字母字形边界，让 N/S/W/E 的「字形边缘」到组件边缘距离统一为 edge（30px）。
+        // 注意 drawText 的 y 是基线（字形向上延伸），x（CENTER 对齐）是字形中心。
+        float edge = 30f;
+        android.graphics.Rect bN = new android.graphics.Rect();
+        android.graphics.Rect bS = new android.graphics.Rect();
+        android.graphics.Rect bW = new android.graphics.Rect();
+        android.graphics.Rect bE = new android.graphics.Rect();
+        labelPaint.getTextBounds("N", 0, 1, bN);
+        labelPaint.getTextBounds("S", 0, 1, bS);
+        labelPaint.getTextBounds("W", 0, 1, bW);
+        labelPaint.getTextBounds("E", 0, 1, bE);
 
-        canvas.drawText("N", cx, 64f + capHeight, labelPaint); // N 字形顶部距顶 64
-        canvas.drawText("S", cx, size - 64f, labelPaint);       // S 字形底部距底 64
-        canvas.drawText("W", 64f, cy + 18f, labelPaint);
-        canvas.drawText("E", size - 64f, cy + 18f, labelPaint);
+        // N（顶）：字形顶部距顶 edge
+        canvas.drawText("N", cx, edge - bN.top, labelPaint);
+        // S（底）：字形底部距底 edge
+        canvas.drawText("S", cx, size - edge - bS.bottom, labelPaint);
+        // W（左）：字形左边距左 edge，垂直居中
+        canvas.drawText("W", edge + bW.width() / 2f, cy - (bW.top + bW.bottom) / 2f, labelPaint);
+        // E（右）：字形右边距右 edge，垂直居中
+        canvas.drawText("E", size - edge - bE.width() / 2f, cy - (bE.top + bE.bottom) / 2f, labelPaint);
 
         // 点阵箭头（旋转指向方向，绕表盘中心）
         canvas.save();
