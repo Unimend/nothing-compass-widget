@@ -187,10 +187,16 @@ public class CompassService extends Service implements SensorEventListener {
         float azimuth = smoothAngle(rawAzimuth);
 
         AppWidgetManager mgr = AppWidgetManager.getInstance(this);
-        int[] ids = mgr.getAppWidgetIds(new ComponentName(this, CompassWidgetProvider.class));
+        updateProviderWidgets(mgr, azimuth, CompassWidgetProvider.class, false);
+        updateProviderWidgets(mgr, azimuth, CompassBlackWidgetProvider.class, true);
+    }
+
+    private void updateProviderWidgets(AppWidgetManager mgr, float azimuth,
+                                       Class<?> providerClass, boolean black) {
+        int[] ids = mgr.getAppWidgetIds(new ComponentName(this, providerClass));
         for (int id : ids) {
             RemoteViews views = new RemoteViews(getPackageName(), R.layout.widget_layout);
-            views.setImageViewBitmap(R.id.arrow, drawCompass(azimuth));
+            views.setImageViewBitmap(R.id.arrow, drawCompass(azimuth, black));
             Intent launchIntent = getPackageManager().getLaunchIntentForPackage("com.coloros.compass2");
             if (launchIntent != null) {
                 PendingIntent pi = PendingIntent.getActivity(
@@ -215,11 +221,18 @@ public class CompassService extends Service implements SensorEventListener {
         return smoothedAzimuth;
     }
 
-    private Bitmap drawCompass(float azimuth) {
+    private Bitmap drawCompass(float azimuth, boolean black) {
         int size = 512;
         Bitmap bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bmp);
-        // 透明背景（不填充黑色）
+        if (black) {
+            // 黑底版：不透明黑色圆角卡片背景
+            Paint bg = new Paint();
+            bg.setColor(Color.BLACK);
+            bg.setAntiAlias(true);
+            canvas.drawRoundRect(0, 0, size, size, 48f, 48f, bg);
+        }
+        // 透明版：不填充背景
 
         float cx = size / 2f;
         float cy = size / 2f;

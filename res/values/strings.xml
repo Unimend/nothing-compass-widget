@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">指南针·透明</string>
+    <string name="app_name">指南针</string>
     <string name="widget_description">1x1 指南针小组件（透明背景）</string>
+    <string name="widget_description_black">1x1 指南针小组件（黑底）</string>
 </resources>
