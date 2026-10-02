@@ -236,7 +236,7 @@ public class CompassService extends Service implements SensorEventListener {
 
         float cx = size / 2f;
         float cy = size / 2f;
-        float dialCy = 252f; // 表盘视觉中心（N/S 是文字，视觉中心比基线中点高约 20px）
+        float dialCy = size / 2f; // 旋转中心 = 组件正中心 (256,256)
 
         // N / E / S / W 标签
         Paint labelPaint = new Paint();
@@ -247,9 +247,9 @@ public class CompassService extends Service implements SensorEventListener {
         labelPaint.setAntiAlias(true);
 
         canvas.drawText("N", cx, 64f, labelPaint);
-        canvas.drawText("S", cx, size - 32f, labelPaint);
-        canvas.drawText("W", 58f, cy + 18f, labelPaint);
-        canvas.drawText("E", size - 58f, cy + 18f, labelPaint);
+        canvas.drawText("S", cx, size - 64f, labelPaint);
+        canvas.drawText("W", 64f, cy + 18f, labelPaint);
+        canvas.drawText("E", size - 64f, cy + 18f, labelPaint);
 
         // 点阵箭头（旋转指向方向，绕表盘中心）
         canvas.save();
@@ -268,7 +268,7 @@ public class CompassService extends Service implements SensorEventListener {
         String latStr = Double.isNaN(latitude) ? "--.--N" : String.format(Locale.US, "%.2fN", latitude);
         String lonStr = Double.isNaN(longitude) ? "--.--E" : String.format(Locale.US, "%.2fE", longitude);
         String info = Math.round(azimuth) + "  " + latStr + "  " + lonStr;
-        canvas.drawText(info, cx, size - 108f, infoPaint);
+        canvas.drawText(info, cx, size - 140f, infoPaint);
 
         return bmp;
     }
