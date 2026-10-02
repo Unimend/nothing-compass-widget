@@ -246,8 +246,14 @@ public class CompassService extends Service implements SensorEventListener {
         labelPaint.setTextAlign(Paint.Align.CENTER);
         labelPaint.setAntiAlias(true);
 
-        canvas.drawText("N", cx, 64f, labelPaint);
-        canvas.drawText("S", cx, size - 64f, labelPaint);
+        // 测量大写字母字形高度（cap height）：drawText 的 y 是基线、字形向上延伸，
+        // 所以顶部标签 N 要额外下移一个 cap height，才能让 N/S 的「字形边缘」距边缘相等
+        android.graphics.Rect capBounds = new android.graphics.Rect();
+        labelPaint.getTextBounds("N", 0, 1, capBounds);
+        float capHeight = -capBounds.top;
+
+        canvas.drawText("N", cx, 64f + capHeight, labelPaint); // N 字形顶部距顶 64
+        canvas.drawText("S", cx, size - 64f, labelPaint);       // S 字形底部距底 64
         canvas.drawText("W", 64f, cy + 18f, labelPaint);
         canvas.drawText("E", size - 64f, cy + 18f, labelPaint);
 
