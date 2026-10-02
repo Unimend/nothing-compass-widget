@@ -230,7 +230,7 @@ public class CompassService extends Service implements SensorEventListener {
             Paint bg = new Paint();
             bg.setColor(Color.BLACK);
             bg.setAntiAlias(true);
-            canvas.drawRoundRect(0, 0, size, size, 48f, 48f, bg);
+            canvas.drawRoundRect(0, 0, size, size, 72f, 72f, bg);
         }
         // 透明版：不填充背景
 
