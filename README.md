@@ -68,8 +68,8 @@ Windows PowerShell：
 APK 元数据：
 
 - 包名：`com.unimend.nothingcompass`
-- versionName：`2.3.1`
-- versionCode：`6`
+- versionName：`2.4.0`
+- versionCode：`7`
 - minSdk：23
 - targetSdk：31
 

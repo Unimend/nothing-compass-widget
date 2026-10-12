@@ -276,6 +276,7 @@ public class CompassService extends Service implements SensorEventListener {
         Canvas canvas = new Canvas(bitmap);
 
         float center = SIZE / 2f;
+        drawDirectionBars(canvas, azimuth);
         Paint labelPaint = textPaint(76f, Color.WHITE);
         drawCenteredGlyph(canvas, "N", center, 42f, Edge.TOP, labelPaint);
         drawCenteredGlyph(canvas, "S", center, SIZE - 42f, Edge.BOTTOM, labelPaint);
@@ -307,6 +308,48 @@ public class CompassService extends Service implements SensorEventListener {
             drawPixelCenteredText(canvas, status, center, SIZE - 68f, statusPaint);
         }
         return bitmap;
+    }
+
+    /**
+     * Shows the north/east/south/west components of the current heading at the
+     * matching card edges. At diagonal headings two adjacent bars share the
+     * emphasis, so the decoration changes continuously instead of snapping.
+     */
+    private void drawDirectionBars(Canvas canvas, float azimuth) {
+        if (Float.isNaN(azimuth)) return;
+        double radians = Math.toRadians(azimuth);
+        float north = Math.max(0f, (float) Math.cos(radians));
+        float east = Math.max(0f, (float) Math.sin(radians));
+        float south = Math.max(0f, -(float) Math.cos(radians));
+        float west = Math.max(0f, -(float) Math.sin(radians));
+
+        drawHorizontalDirectionBar(canvas, 14f, north);
+        drawHorizontalDirectionBar(canvas, SIZE - 24f, south);
+        drawVerticalDirectionBar(canvas, 14f, west);
+        drawVerticalDirectionBar(canvas, SIZE - 24f, east);
+    }
+
+    private void drawHorizontalDirectionBar(Canvas canvas, float top, float strength) {
+        if (strength < 0.08f) return;
+        Paint barPaint = directionBarPaint(strength);
+        float halfLength = 44f + 44f * strength;
+        canvas.drawRect(SIZE / 2f - halfLength, top,
+                SIZE / 2f + halfLength, top + 10f, barPaint);
+    }
+
+    private void drawVerticalDirectionBar(Canvas canvas, float left, float strength) {
+        if (strength < 0.08f) return;
+        Paint barPaint = directionBarPaint(strength);
+        float halfLength = 44f + 44f * strength;
+        canvas.drawRect(left, SIZE / 2f - halfLength,
+                left + 10f, SIZE / 2f + halfLength, barPaint);
+    }
+
+    private Paint directionBarPaint(float strength) {
+        Paint paint = new Paint();
+        paint.setAntiAlias(false);
+        paint.setColor(Color.argb(Math.round(55f + 200f * strength), 255, 45, 45));
+        return paint;
     }
 
     private void updateFromLastKnownLocation() {
