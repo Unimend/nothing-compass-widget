@@ -15,9 +15,7 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
-import android.graphics.Path;
 import android.graphics.Rect;
-import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
@@ -262,6 +260,7 @@ public class CompassService extends Service implements SensorEventListener {
         PendingIntent compassIntent = compassPendingIntent();
         for (int id : ids) {
             RemoteViews views = new RemoteViews(getPackageName(), R.layout.widget_layout);
+            views.setImageViewBitmap(R.id.background_matrix, matrixBitmap);
             views.setImageViewBitmap(R.id.compass_content, content);
             if (compassIntent != null) {
                 views.setOnClickPendingIntent(R.id.click_target, compassIntent);
@@ -275,7 +274,6 @@ public class CompassService extends Service implements SensorEventListener {
         Bitmap bitmap = frameBuffers[frameBufferIndex];
         bitmap.eraseColor(Color.TRANSPARENT);
         Canvas canvas = new Canvas(bitmap);
-        drawCardBackground(canvas);
 
         float center = SIZE / 2f;
         Paint labelPaint = textPaint(58f, Color.WHITE);
@@ -309,20 +307,6 @@ public class CompassService extends Service implements SensorEventListener {
             drawPixelCenteredText(canvas, status, center, SIZE - 68f, statusPaint);
         }
         return bitmap;
-    }
-
-    private void drawCardBackground(Canvas canvas) {
-        RectF card = new RectF(0f, 0f, SIZE, SIZE);
-        Paint black = new Paint(Paint.ANTI_ALIAS_FLAG);
-        black.setColor(Color.BLACK);
-        canvas.drawRoundRect(card, 58f, 58f, black);
-
-        Path clip = new Path();
-        clip.addRoundRect(card, 58f, 58f, Path.Direction.CW);
-        canvas.save();
-        canvas.clipPath(clip);
-        canvas.drawBitmap(matrixBitmap, 0f, 0f, null);
-        canvas.restore();
     }
 
     private void updateFromLastKnownLocation() {

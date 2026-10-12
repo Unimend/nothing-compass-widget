@@ -4,20 +4,34 @@
     android:layout_height="match_parent"
     android:background="@android:color/transparent">
 
-    <ImageView
-        android:id="@+id/compass_content"
+    <FrameLayout
+        android:id="@+id/card_container"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_marginStart="10dp"
-        android:scaleType="fitStart"
-        android:contentDescription="@string/widget_description" />
+        android:layout_margin="9dp"
+        android:background="@drawable/widget_card_background"
+        android:clipToOutline="true">
 
-    <ImageView
-        android:id="@+id/click_target"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:layout_marginStart="10dp"
-        android:background="@android:color/transparent"
-        android:contentDescription="@string/widget_description" />
+        <ImageView
+            android:id="@+id/background_matrix"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop" />
+
+        <ImageView
+            android:id="@+id/compass_content"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="fitCenter"
+            android:contentDescription="@string/widget_description" />
+
+        <ImageView
+            android:id="@+id/click_target"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@android:color/transparent"
+            android:contentDescription="@string/widget_description" />
+
+    </FrameLayout>
 
 </FrameLayout>
