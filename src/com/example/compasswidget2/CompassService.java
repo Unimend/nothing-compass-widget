@@ -443,8 +443,11 @@ public class CompassService extends Service implements SensorEventListener {
     }
 
     private PendingIntent compassPendingIntent() {
-        Intent launch = getPackageManager().getLaunchIntentForPackage("com.coloros.compass2");
-        if (launch == null) return null;
+        Intent launch = new Intent(Intent.ACTION_MAIN)
+                .setClassName("com.coloros.compass2",
+                        "com.coloros.compass.flat.FlatCompass")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                        | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
         return PendingIntent.getActivity(this, 100, launch,
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
     }

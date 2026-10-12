@@ -2,6 +2,15 @@
 
 Nothing Compass Widget 的开发决策、验证结果和已踩坑记录。
 
+## 2026-10-12 - v2.2.1 删除重加后的空白与点击恢复
+
+- 在 3×5 桌面删除后重新添加指南针，AppWidget 已绑定，但 ColorOS `OplusHansManager` 拒绝将只具有 widget importance 的进程转到前台，`CompassService` 保持 `app=null`。
+- 旧版初始布局完全透明，且点击 PendingIntent 只由服务绑定，因此服务被冻结时同时表现为“组件消失”和“无法点击”。
+- Provider 现在在 `onUpdate` 和尺寸变化时先同步显示静态指南针，并绑定 ColorOS 指南针的 PendingIntent，然后再尝试启动动态服务。
+- 即使 OEM 暂时阻止后台服务，组件也不再透明，并且始终可点击进入 `com.coloros.compass2` 系统指南针。
+- 首次点击验收发现 Android 11+ 包可见性会让 `getLaunchIntentForPackage()` 返回空值；改为真机确认的显式组件 `com.coloros.compass2/com.coloros.compass.flat.FlatCompass`，不再依赖包查询。
+- 版本升级为 `2.2.1`、`versionCode=4`。
+
 ## 2026-10-12 - v2.2.0 对称对齐与统一外框
 
 - 真机 5×6 验证证明 Launcher 分配的 1×1 宿主不是正方形；无法同时满足“整卡严格正方形”、“与 FM 等高”和“左右两侧均对齐”。

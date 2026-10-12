@@ -14,6 +14,7 @@ v2 只保留黑色圆角卡片版本，使用 Doto 点阵字体、静态无缝�
 - 磁场精度不可靠时显示 `CALIBRATE`
 - 屏幕熄灭后停止传感器，亮屏后自动恢复
 - 点击组件可打开 ColorOS 指南针（已安装时）
+- 新增组件时由 Provider 立即提供静态指南针和点击跳转，不再依赖动态服务先启动
 - 只为经纬度申请定位权限，不申请存储或电话权限
 
 ## 尺寸适配
@@ -65,8 +66,8 @@ Windows PowerShell：
 APK 元数据：
 
 - 包名：`com.unimend.nothingcompass`
-- versionName：`2.2.0`
-- versionCode：`3`
+- versionName：`2.2.1`
+- versionCode：`4`
 - minSdk：23
 - targetSdk：31
 
