@@ -15,14 +15,20 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
+import android.location.Location;
+import android.location.LocationManager;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
 import android.view.Surface;
@@ -36,25 +42,31 @@ public class CompassService extends Service implements SensorEventListener {
     public static final String ACTION_START = "com.example.compasswidget2.START";
 
     private static final int SIZE = 512;
-    private static final float SMOOTHING = 0.12f;
-    private static final long MIN_RENDER_INTERVAL_MS = 200L;
-    private static final long FORCE_RENDER_INTERVAL_MS = 1500L;
-    private static final float MIN_RENDER_DELTA_DEGREES = 0.7f;
+    private static final float SMOOTHING = 0.28f;
+    private static final long MIN_RENDER_INTERVAL_MS = 100L;
+    private static final long FORCE_RENDER_INTERVAL_MS = 1000L;
+    private static final float MIN_RENDER_DELTA_DEGREES = 0.25f;
+    private static final long LOCATION_REFRESH_INTERVAL_MS = 5 * 60 * 1000L;
 
     private final float[] gravity = new float[3];
     private final float[] geomagnetic = new float[3];
     private final float[] rotationMatrix = new float[9];
     private final float[] adjustedRotationMatrix = new float[9];
     private final float[] orientation = new float[3];
+    private final float[] rotationVectorValues = new float[5];
     private final Bitmap[] frameBuffers = new Bitmap[2];
+    private final Handler handler = new Handler(Looper.getMainLooper());
 
     private SensorManager sensorManager;
     private Sensor accelerometer;
     private Sensor magnetometer;
+    private Sensor rotationVectorSensor;
+    private LocationManager locationManager;
     private Typeface dotoTypeface;
     private Bitmap matrixBitmap;
     private boolean hasGravity;
     private boolean hasGeomagnetic;
+    private boolean hasRotationVector;
     private boolean sensorsRegistered;
     private boolean receiverRegistered;
     private int magneticAccuracy = SensorManager.SENSOR_STATUS_UNRELIABLE;
@@ -62,6 +74,16 @@ public class CompassService extends Service implements SensorEventListener {
     private float smoothedAzimuth = Float.NaN;
     private float lastRenderedAzimuth = Float.NaN;
     private long lastRenderAt;
+    private double latitude = Double.NaN;
+    private double longitude = Double.NaN;
+
+    private final Runnable locationRefresh = new Runnable() {
+        @Override
+        public void run() {
+            updateFromLastKnownLocation();
+            handler.postDelayed(this, LOCATION_REFRESH_INTERVAL_MS);
+        }
+    };
 
     private final BroadcastReceiver screenReceiver = new BroadcastReceiver() {
         @Override
@@ -81,6 +103,8 @@ public class CompassService extends Service implements SensorEventListener {
         sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
+        rotationVectorSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
+        locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
         frameBuffers[0] = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888);
         frameBuffers[1] = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888);
         matrixBitmap = drawMatrix();
@@ -90,6 +114,7 @@ public class CompassService extends Service implements SensorEventListener {
         filter.addAction(Intent.ACTION_SCREEN_OFF);
         registerReceiver(screenReceiver, filter);
         receiverRegistered = true;
+        handler.post(locationRefresh);
     }
 
     @Override
@@ -99,7 +124,7 @@ public class CompassService extends Service implements SensorEventListener {
             return START_NOT_STICKY;
         }
         startForeground(1, buildNotification());
-        if (accelerometer == null || magnetometer == null) {
+        if (rotationVectorSensor == null && (accelerometer == null || magnetometer == null)) {
             updateWidgets(Float.NaN, "NO SENSOR");
             return START_NOT_STICKY;
         }
@@ -117,9 +142,15 @@ public class CompassService extends Service implements SensorEventListener {
     private void startSensorsIfInteractive() {
         PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
         if (powerManager != null && !powerManager.isInteractive()) return;
-        if (sensorsRegistered || accelerometer == null || magnetometer == null) return;
-        sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_GAME);
-        sensorManager.registerListener(this, magnetometer, SensorManager.SENSOR_DELAY_GAME);
+        if (sensorsRegistered) return;
+        if (rotationVectorSensor != null) {
+            sensorManager.registerListener(
+                    this, rotationVectorSensor, SensorManager.SENSOR_DELAY_GAME);
+        } else {
+            if (accelerometer == null || magnetometer == null) return;
+            sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_GAME);
+            sensorManager.registerListener(this, magnetometer, SensorManager.SENSOR_DELAY_GAME);
+        }
         sensorsRegistered = true;
     }
 
@@ -129,18 +160,23 @@ public class CompassService extends Service implements SensorEventListener {
         sensorsRegistered = false;
         hasGravity = false;
         hasGeomagnetic = false;
+        hasRotationVector = false;
     }
 
     @Override
     public void onSensorChanged(SensorEvent event) {
-        if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
+        if (event.sensor.getType() == Sensor.TYPE_ROTATION_VECTOR) {
+            int length = Math.min(event.values.length, rotationVectorValues.length);
+            System.arraycopy(event.values, 0, rotationVectorValues, 0, length);
+            hasRotationVector = true;
+        } else if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
             System.arraycopy(event.values, 0, gravity, 0, gravity.length);
             hasGravity = true;
         } else if (event.sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD) {
             System.arraycopy(event.values, 0, geomagnetic, 0, geomagnetic.length);
             hasGeomagnetic = true;
         }
-        if (!hasGravity || !hasGeomagnetic) return;
+        if (!hasRotationVector && (!hasGravity || !hasGeomagnetic)) return;
 
         float azimuth = calculateAzimuth();
         if (Float.isNaN(azimuth)) return;
@@ -158,8 +194,12 @@ public class CompassService extends Service implements SensorEventListener {
     }
 
     private float calculateAzimuth() {
-        if (!SensorManager.getRotationMatrix(rotationMatrix, null, gravity, geomagnetic)) {
-            return Float.NaN;
+        if (hasRotationVector) {
+            SensorManager.getRotationMatrixFromVector(rotationMatrix, rotationVectorValues);
+        } else {
+            if (!SensorManager.getRotationMatrix(rotationMatrix, null, gravity, geomagnetic)) {
+                return Float.NaN;
+            }
         }
         int xAxis = SensorManager.AXIS_X;
         int yAxis = SensorManager.AXIS_Y;
@@ -222,7 +262,6 @@ public class CompassService extends Service implements SensorEventListener {
         PendingIntent compassIntent = compassPendingIntent();
         for (int id : ids) {
             RemoteViews views = new RemoteViews(getPackageName(), R.layout.widget_layout);
-            views.setImageViewBitmap(R.id.background_matrix, matrixBitmap);
             views.setImageViewBitmap(R.id.compass_content, content);
             if (compassIntent != null) {
                 views.setOnClickPendingIntent(R.id.click_target, compassIntent);
@@ -236,6 +275,7 @@ public class CompassService extends Service implements SensorEventListener {
         Bitmap bitmap = frameBuffers[frameBufferIndex];
         bitmap.eraseColor(Color.TRANSPARENT);
         Canvas canvas = new Canvas(bitmap);
+        drawCardBackground(canvas);
 
         float center = SIZE / 2f;
         Paint labelPaint = textPaint(58f, Color.WHITE);
@@ -258,14 +298,63 @@ public class CompassService extends Service implements SensorEventListener {
         String degree = Float.isNaN(azimuth)
                 ? "---" : String.format(Locale.US, "%03d", Math.round(azimuth) % 360);
         String degreeLine = directionStatus ? degree + " " + status : degree;
-        drawPixelCenteredText(canvas, degreeLine, center, SIZE - 120f, degreePaint);
+        drawPixelCenteredText(canvas, degreeLine, center, SIZE - 132f, degreePaint);
+
+        Paint locationPaint = textPaint(22f, Color.LTGRAY);
+        drawPixelCenteredText(canvas, locationText(), center, SIZE - 98f, locationPaint);
 
         if (!directionStatus) {
             Paint statusPaint = textPaint(22f,
                     "CALIBRATE".equals(status) ? Color.rgb(255, 55, 65) : Color.LTGRAY);
-            drawPixelCenteredText(canvas, status, center, SIZE - 82f, statusPaint);
+            drawPixelCenteredText(canvas, status, center, SIZE - 68f, statusPaint);
         }
         return bitmap;
+    }
+
+    private void drawCardBackground(Canvas canvas) {
+        RectF card = new RectF(0f, 0f, SIZE, SIZE);
+        Paint black = new Paint(Paint.ANTI_ALIAS_FLAG);
+        black.setColor(Color.BLACK);
+        canvas.drawRoundRect(card, 58f, 58f, black);
+
+        Path clip = new Path();
+        clip.addRoundRect(card, 58f, 58f, Path.Direction.CW);
+        canvas.save();
+        canvas.clipPath(clip);
+        canvas.drawBitmap(matrixBitmap, 0f, 0f, null);
+        canvas.restore();
+    }
+
+    private void updateFromLastKnownLocation() {
+        if (locationManager == null) return;
+        try {
+            Location best = null;
+            for (String provider : locationManager.getProviders(true)) {
+                Location candidate = locationManager.getLastKnownLocation(provider);
+                if (candidate != null && (best == null
+                        || candidate.getTime() > best.getTime())) {
+                    best = candidate;
+                }
+            }
+            if (best != null) {
+                latitude = best.getLatitude();
+                longitude = best.getLongitude();
+            }
+        } catch (SecurityException ignored) {
+            latitude = Double.NaN;
+            longitude = Double.NaN;
+        }
+    }
+
+    private String locationText() {
+        if (Double.isNaN(latitude) || Double.isNaN(longitude)) {
+            return "--.--N --.--E";
+        }
+        String latitudeText = String.format(Locale.US, "%.2f%s",
+                Math.abs(latitude), latitude >= 0 ? "N" : "S");
+        String longitudeText = String.format(Locale.US, "%.2f%s",
+                Math.abs(longitude), longitude >= 0 ? "E" : "W");
+        return latitudeText + " " + longitudeText;
     }
 
     private Bitmap drawMatrix() {
@@ -406,7 +495,8 @@ public class CompassService extends Service implements SensorEventListener {
 
     @Override
     public void onAccuracyChanged(Sensor sensor, int accuracy) {
-        if (sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD) {
+        if (sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD
+                || sensor.getType() == Sensor.TYPE_ROTATION_VECTOR) {
             magneticAccuracy = accuracy;
         }
     }
@@ -414,6 +504,7 @@ public class CompassService extends Service implements SensorEventListener {
     @Override
     public void onDestroy() {
         stopSensors();
+        handler.removeCallbacks(locationRefresh);
         if (receiverRegistered) {
             unregisterReceiver(screenReceiver);
             receiverRegistered = false;
