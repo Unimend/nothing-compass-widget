@@ -296,10 +296,10 @@ public class CompassService extends Service implements SensorEventListener {
         String degree = Float.isNaN(azimuth)
                 ? "---" : String.format(Locale.US, "%03d", Math.round(azimuth) % 360);
         String degreeLine = directionStatus ? degree + " " + status : degree;
-        drawPixelCenteredText(canvas, degreeLine, center, SIZE - 132f, degreePaint);
+        drawPixelCenteredText(canvas, degreeLine, center, SIZE - 152f, degreePaint);
 
         Paint locationPaint = textPaint(30f, Color.LTGRAY);
-        drawPixelCenteredText(canvas, locationText(), center, SIZE - 98f, locationPaint);
+        drawPixelCenteredText(canvas, locationText(), center, SIZE - 116f, locationPaint);
 
         if (!directionStatus) {
             Paint statusPaint = textPaint(28f,
