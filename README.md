@@ -19,7 +19,9 @@ v2 只保留黑色圆角卡片版本，使用 Doto 点阵字体、静态无缝�
 
 ## 尺寸适配
 
-可见黑色卡片使用四边对称的 9dp 宿主边距和 14dp XML 圆角，与 FM 组件共用同一外框基准。方格背景使用 `centerCrop`并被外框统一裁切；罗盘使用独立 512×512 透明坐标系和 `fitCenter`，因此即使 Launcher 的 `1×1` 宿主不是正方形，内部罗盘、文字和箭头也不会变形。
+当前以 OnePlus 7T Pro、OPlus Launcher `3×5` 为主验收基准。该网格的 1×1 宿主高度比宽度约多 10 个物理像素，因此卡片使用左右 9dp、上下 10.5dp 的固定适配边距，将可见外框校正为正方形。这是当前设备与网格的视觉适配值，不是 Android 通用常量。
+
+外框使用 14dp XML 圆角；方格背景使用 `centerCrop`并被外框统一裁切；罗盘使用独立 512×512 透明坐标系和 `fitCenter`，内部罗盘、文字和箭头不会变形。
 
 不使用 `fitXY` 或单侧 margin：四边对称边距使组件放在桌面左侧和右侧时都遵守同一对齐规则。
 
@@ -66,8 +68,8 @@ Windows PowerShell：
 APK 元数据：
 
 - 包名：`com.unimend.nothingcompass`
-- versionName：`2.2.1`
-- versionCode：`4`
+- versionName：`2.3.0`
+- versionCode：`5`
 - minSdk：23
 - targetSdk：31
 

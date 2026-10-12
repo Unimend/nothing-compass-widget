@@ -276,7 +276,7 @@ public class CompassService extends Service implements SensorEventListener {
         Canvas canvas = new Canvas(bitmap);
 
         float center = SIZE / 2f;
-        Paint labelPaint = textPaint(58f, Color.WHITE);
+        Paint labelPaint = textPaint(76f, Color.WHITE);
         drawCenteredGlyph(canvas, "N", center, 42f, Edge.TOP, labelPaint);
         drawCenteredGlyph(canvas, "S", center, SIZE - 42f, Edge.BOTTOM, labelPaint);
         drawCenteredGlyph(canvas, "W", 42f, center, Edge.LEFT, labelPaint);
@@ -291,18 +291,18 @@ public class CompassService extends Service implements SensorEventListener {
             drawIdleMark(canvas, center, center);
         }
 
-        Paint degreePaint = textPaint(36f, Color.WHITE);
+        Paint degreePaint = textPaint(48f, Color.WHITE);
         boolean directionStatus = isDirection(status);
         String degree = Float.isNaN(azimuth)
                 ? "---" : String.format(Locale.US, "%03d", Math.round(azimuth) % 360);
         String degreeLine = directionStatus ? degree + " " + status : degree;
         drawPixelCenteredText(canvas, degreeLine, center, SIZE - 132f, degreePaint);
 
-        Paint locationPaint = textPaint(22f, Color.LTGRAY);
+        Paint locationPaint = textPaint(30f, Color.LTGRAY);
         drawPixelCenteredText(canvas, locationText(), center, SIZE - 98f, locationPaint);
 
         if (!directionStatus) {
-            Paint statusPaint = textPaint(22f,
+            Paint statusPaint = textPaint(28f,
                     "CALIBRATE".equals(status) ? Color.rgb(255, 55, 65) : Color.LTGRAY);
             drawPixelCenteredText(canvas, status, center, SIZE - 68f, statusPaint);
         }
