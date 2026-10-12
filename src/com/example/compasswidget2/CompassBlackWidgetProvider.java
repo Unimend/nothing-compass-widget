@@ -4,24 +4,51 @@ import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProvider;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
+import android.os.Bundle;
 
 /**
- * 黑底版指南针组件（与 CompassWidgetProvider 共用同一个 CompassService，
- * 区别仅在绘制时用黑色圆角卡片背景）。
+ * The single black-card compass widget provider.
  */
 public class CompassBlackWidgetProvider extends AppWidgetProvider {
 
     @Override
+    public void onReceive(Context context, Intent intent) {
+        super.onReceive(context, intent);
+        String action = intent == null ? null : intent.getAction();
+        if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)
+                || Intent.ACTION_BOOT_COMPLETED.equals(action)) {
+            startCompass(context);
+        }
+    }
+
+    @Override
     public void onUpdate(Context context, AppWidgetManager appWidgetManager, int[] appWidgetIds) {
-        Intent intent = new Intent(context, CompassService.class);
-        intent.setAction(CompassService.ACTION_START);
-        context.startForegroundService(intent);
+        startCompass(context);
+    }
+
+    @Override
+    public void onAppWidgetOptionsChanged(Context context, AppWidgetManager appWidgetManager,
+                                          int appWidgetId, Bundle newOptions) {
+        startCompass(context);
     }
 
     @Override
     public void onDisabled(Context context) {
-        Intent intent = new Intent(context, CompassService.class);
-        intent.setAction(CompassService.ACTION_STOP);
-        context.startService(intent);
+        context.stopService(new Intent(context, CompassService.class));
+    }
+
+    private void startCompass(Context context) {
+        Intent intent = new Intent(context, CompassService.class)
+                .setAction(CompassService.ACTION_START);
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                context.startForegroundService(intent);
+            } else {
+                context.startService(intent);
+            }
+        } catch (RuntimeException ignored) {
+            // Some launchers defer background starts. Their next widget update retries.
+        }
     }
 }

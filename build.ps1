@@ -32,7 +32,9 @@ Write-Host "===== 1. aapt2 compile resources =====" -ForegroundColor Cyan
 
 Write-Host "===== 2. aapt2 link (pack assets fonts) =====" -ForegroundColor Cyan
 & "$BT\aapt2.exe" link -o "$OUT\base.apk" -I $PLATFORM --manifest "$PROJ\AndroidManifest.xml" `
-    -R "$OUT\compiled\res.zip" --java "$OUT\gen" -A "$PROJ\assets" --auto-add-overlay
+    -R "$OUT\compiled\res.zip" --java "$OUT\gen" -A "$PROJ\assets" --auto-add-overlay `
+    --rename-manifest-package com.unimend.nothingcompass `
+    --min-sdk-version 23 --target-sdk-version 31 --version-code 1 --version-name "2.0.0"
 
 Write-Host "===== 3. javac compile Java =====" -ForegroundColor Cyan
 $srcs = (Get-ChildItem "$PROJ\src" -Recurse -Filter *.java).FullName
@@ -73,6 +75,8 @@ if (-not (Test-Path "$OUT\debug.keystore")) {
 & "$BT\apksigner.bat" sign --ks "$OUT\debug.keystore" --ks-pass pass:android `
     --key-pass pass:android --ks-key-alias androiddebugkey `
     --out "$OUT\compasswidget2.apk" "$OUT\aligned.apk"
+
+& "$BT\apksigner.bat" verify --verbose "$OUT\compasswidget2.apk"
 
 Write-Host ""
 Write-Host "BUILD OK: $OUT\compasswidget2.apk" -ForegroundColor Green

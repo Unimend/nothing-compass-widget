@@ -6,23 +6,27 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.appwidget.AppWidgetManager;
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
-import android.location.Location;
-import android.location.LocationListener;
-import android.location.LocationManager;
-import android.os.Bundle;
+import android.os.Build;
 import android.os.IBinder;
-import android.util.Log;
+import android.os.PowerManager;
+import android.os.SystemClock;
+import android.view.Surface;
+import android.view.WindowManager;
 import android.widget.RemoteViews;
 
 import java.util.Locale;
@@ -30,182 +34,161 @@ import java.util.Locale;
 public class CompassService extends Service implements SensorEventListener {
 
     public static final String ACTION_START = "com.example.compasswidget2.START";
-    public static final String ACTION_STOP = "com.example.compasswidget2.STOP";
 
+    private static final int SIZE = 512;
     private static final float SMOOTHING = 0.12f;
+    private static final long MIN_RENDER_INTERVAL_MS = 200L;
+    private static final long FORCE_RENDER_INTERVAL_MS = 1500L;
+    private static final float MIN_RENDER_DELTA_DEGREES = 0.7f;
+
+    private final float[] gravity = new float[3];
+    private final float[] geomagnetic = new float[3];
+    private final float[] rotationMatrix = new float[9];
+    private final float[] adjustedRotationMatrix = new float[9];
+    private final float[] orientation = new float[3];
+    private final Bitmap[] frameBuffers = new Bitmap[2];
 
     private SensorManager sensorManager;
     private Sensor accelerometer;
     private Sensor magnetometer;
-    private float[] gravity = new float[3];
-    private float[] geomagnetic = new float[3];
-    private boolean hasGravity = false;
-    private boolean hasGeomagnetic = false;
-
+    private Typeface dotoTypeface;
+    private Bitmap matrixBitmap;
+    private boolean hasGravity;
+    private boolean hasGeomagnetic;
+    private boolean sensorsRegistered;
+    private boolean receiverRegistered;
+    private int magneticAccuracy = SensorManager.SENSOR_STATUS_UNRELIABLE;
+    private int frameBufferIndex;
     private float smoothedAzimuth = Float.NaN;
-    private Typeface ndotTypeface;
+    private float lastRenderedAzimuth = Float.NaN;
+    private long lastRenderAt;
 
-    private LocationManager locationManager;
-    private double latitude = Double.NaN;
-    private double longitude = Double.NaN;
-    private final LocationListener locationListener = new LocationListener() {
+    private final BroadcastReceiver screenReceiver = new BroadcastReceiver() {
         @Override
-        public void onLocationChanged(Location location) {
-            latitude = location.getLatitude();
-            longitude = location.getLongitude();
-        }
-
-        @Override
-        public void onStatusChanged(String provider, int status, Bundle extras) {
-        }
-
-        @Override
-        public void onProviderEnabled(String provider) {
-        }
-
-        @Override
-        public void onProviderDisabled(String provider) {
+        public void onReceive(Context context, Intent intent) {
+            if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) {
+                stopSensors();
+            } else if (Intent.ACTION_SCREEN_ON.equals(intent.getAction())) {
+                startSensorsIfInteractive();
+            }
         }
     };
 
     @Override
     public void onCreate() {
         super.onCreate();
-        try {
-            ndotTypeface = Typeface.createFromAsset(getAssets(), "ndot.otf");
-        } catch (Exception e) {
-            ndotTypeface = Typeface.DEFAULT;
-        }
+        dotoTypeface = loadTypeface("doto.ttf");
+        sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
+        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+        magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
+        frameBuffers[0] = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888);
+        frameBuffers[1] = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888);
+        matrixBitmap = drawMatrix();
+
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_SCREEN_ON);
+        filter.addAction(Intent.ACTION_SCREEN_OFF);
+        registerReceiver(screenReceiver, filter);
+        receiverRegistered = true;
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+        if (!hasWidgets()) {
             stopSelf();
             return START_NOT_STICKY;
         }
         startForeground(1, buildNotification());
-        sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
-        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
-        magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
-        if (accelerometer != null) {
-            sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_GAME);
+        if (accelerometer == null || magnetometer == null) {
+            updateWidgets(Float.NaN, "NO SENSOR");
+            return START_NOT_STICKY;
         }
-        if (magnetometer != null) {
-            sensorManager.registerListener(this, magnetometer, SensorManager.SENSOR_DELAY_GAME);
-        }
-        startLocation();
+        updateWidgets(Float.NaN, "STARTING");
+        startSensorsIfInteractive();
         return START_STICKY;
     }
 
-    private void startLocation() {
-        locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
-        String[] providers = {
-                LocationManager.FUSED_PROVIDER,
-                LocationManager.GPS_PROVIDER,
-                LocationManager.NETWORK_PROVIDER,
-                LocationManager.PASSIVE_PROVIDER
-        };
-        for (String p : providers) {
-            try {
-                locationManager.requestLocationUpdates(p, 3000, 0, locationListener);
-            } catch (Exception ignored) {
-            }
-        }
-        updateFromLastKnown();
-        // 主动请求一次当前位置（API 30+，用 Fused 提供者）
-        if (android.os.Build.VERSION.SDK_INT >= 30) {
-            try {
-                locationManager.getCurrentLocation(
-                        LocationManager.FUSED_PROVIDER, null,
-                        getMainExecutor(),
-                        location -> {
-                            Log.d("CompassWidget", "getCurrentLocation(fused) = " +
-                                    (location != null ? location.getLatitude() + "," + location.getLongitude() : "null"));
-                            if (location != null) {
-                                latitude = location.getLatitude();
-                                longitude = location.getLongitude();
-                            }
-                        });
-            } catch (Exception e) {
-                Log.e("CompassWidget", "getCurrentLocation failed: " + e);
-            }
-        }
+    private boolean hasWidgets() {
+        int[] ids = AppWidgetManager.getInstance(this).getAppWidgetIds(
+                new ComponentName(this, CompassBlackWidgetProvider.class));
+        return ids.length > 0;
     }
 
-    private void updateFromLastKnown() {
-        try {
-            Location best = null;
-            String[] providers = {
-                    LocationManager.FUSED_PROVIDER,
-                    LocationManager.GPS_PROVIDER,
-                    LocationManager.NETWORK_PROVIDER,
-                    LocationManager.PASSIVE_PROVIDER
-            };
-            for (String p : providers) {
-                Location l = locationManager.getLastKnownLocation(p);
-                Log.d("CompassWidget", "getLastKnownLocation(" + p + ") = " +
-                        (l != null ? l.getLatitude() + "," + l.getLongitude() : "null"));
-                if (l != null && (best == null || l.getTime() > best.getTime())) {
-                    best = l;
-                }
-            }
-            if (best != null) {
-                latitude = best.getLatitude();
-                longitude = best.getLongitude();
-            }
-        } catch (Exception e) {
-            Log.e("CompassWidget", "updateFromLastKnown failed: " + e);
-        }
+    private void startSensorsIfInteractive() {
+        PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
+        if (powerManager != null && !powerManager.isInteractive()) return;
+        if (sensorsRegistered || accelerometer == null || magnetometer == null) return;
+        sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_GAME);
+        sensorManager.registerListener(this, magnetometer, SensorManager.SENSOR_DELAY_GAME);
+        sensorsRegistered = true;
+    }
+
+    private void stopSensors() {
+        if (!sensorsRegistered || sensorManager == null) return;
+        sensorManager.unregisterListener(this);
+        sensorsRegistered = false;
+        hasGravity = false;
+        hasGeomagnetic = false;
     }
 
     @Override
     public void onSensorChanged(SensorEvent event) {
         if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
-            gravity = event.values.clone();
+            System.arraycopy(event.values, 0, gravity, 0, gravity.length);
             hasGravity = true;
         } else if (event.sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD) {
-            geomagnetic = event.values.clone();
+            System.arraycopy(event.values, 0, geomagnetic, 0, geomagnetic.length);
             hasGeomagnetic = true;
         }
-        if (hasGravity && hasGeomagnetic) {
-            updateWidget();
-        }
+        if (!hasGravity || !hasGeomagnetic) return;
+
+        float azimuth = calculateAzimuth();
+        if (Float.isNaN(azimuth)) return;
+        long now = SystemClock.elapsedRealtime();
+        long elapsed = now - lastRenderAt;
+        float delta = angleDistance(azimuth, lastRenderedAzimuth);
+        if (elapsed < MIN_RENDER_INTERVAL_MS) return;
+        if (elapsed < FORCE_RENDER_INTERVAL_MS && delta < MIN_RENDER_DELTA_DEGREES) return;
+
+        String status = magneticAccuracy == SensorManager.SENSOR_STATUS_UNRELIABLE
+                ? "CALIBRATE" : cardinalDirection(azimuth);
+        updateWidgets(azimuth, status);
+        lastRenderAt = now;
+        lastRenderedAzimuth = azimuth;
     }
 
-    private void updateWidget() {
-        float[] rotationMatrix = new float[9];
-        float[] inclinationMatrix = new float[9];
-        boolean success = SensorManager.getRotationMatrix(rotationMatrix, inclinationMatrix, gravity, geomagnetic);
-        if (!success) {
-            return;
+    private float calculateAzimuth() {
+        if (!SensorManager.getRotationMatrix(rotationMatrix, null, gravity, geomagnetic)) {
+            return Float.NaN;
         }
-        float[] orientation = new float[3];
-        SensorManager.getOrientation(rotationMatrix, orientation);
-        float rawAzimuth = (float) Math.toDegrees(orientation[0]);
-        rawAzimuth = (rawAzimuth + 360) % 360;
-        float azimuth = smoothAngle(rawAzimuth);
-
-        AppWidgetManager mgr = AppWidgetManager.getInstance(this);
-        updateProviderWidgets(mgr, azimuth, CompassWidgetProvider.class, false);
-        updateProviderWidgets(mgr, azimuth, CompassBlackWidgetProvider.class, true);
-    }
-
-    private void updateProviderWidgets(AppWidgetManager mgr, float azimuth,
-                                       Class<?> providerClass, boolean black) {
-        int[] ids = mgr.getAppWidgetIds(new ComponentName(this, providerClass));
-        for (int id : ids) {
-            RemoteViews views = new RemoteViews(getPackageName(), R.layout.widget_layout);
-            views.setImageViewBitmap(R.id.arrow, drawCompass(azimuth, black));
-            Intent launchIntent = getPackageManager().getLaunchIntentForPackage("com.coloros.compass2");
-            if (launchIntent != null) {
-                PendingIntent pi = PendingIntent.getActivity(
-                        this, 0, launchIntent,
-                        PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-                views.setOnClickPendingIntent(R.id.arrow, pi);
-            }
-            mgr.updateAppWidget(id, views);
+        int xAxis = SensorManager.AXIS_X;
+        int yAxis = SensorManager.AXIS_Y;
+        WindowManager windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+        int rotation = windowManager == null
+                ? Surface.ROTATION_0 : windowManager.getDefaultDisplay().getRotation();
+        switch (rotation) {
+            case Surface.ROTATION_90:
+                xAxis = SensorManager.AXIS_Y;
+                yAxis = SensorManager.AXIS_MINUS_X;
+                break;
+            case Surface.ROTATION_180:
+                xAxis = SensorManager.AXIS_MINUS_X;
+                yAxis = SensorManager.AXIS_MINUS_Y;
+                break;
+            case Surface.ROTATION_270:
+                xAxis = SensorManager.AXIS_MINUS_Y;
+                yAxis = SensorManager.AXIS_X;
+                break;
+            default:
+                break;
         }
+        if (!SensorManager.remapCoordinateSystem(
+                rotationMatrix, xAxis, yAxis, adjustedRotationMatrix)) {
+            return Float.NaN;
+        }
+        SensorManager.getOrientation(adjustedRotationMatrix, orientation);
+        float rawAzimuth = ((float) Math.toDegrees(orientation[0]) + 360f) % 360f;
+        return smoothAngle(rawAzimuth);
     }
 
     private float smoothAngle(float newAngle) {
@@ -213,138 +196,232 @@ public class CompassService extends Service implements SensorEventListener {
             smoothedAzimuth = newAngle;
         } else {
             float diff = newAngle - smoothedAzimuth;
-            while (diff > 180) diff -= 360;
-            while (diff < -180) diff += 360;
-            smoothedAzimuth += SMOOTHING * diff;
-            smoothedAzimuth = (smoothedAzimuth + 360) % 360;
+            while (diff > 180f) diff -= 360f;
+            while (diff < -180f) diff += 360f;
+            smoothedAzimuth = (smoothedAzimuth + SMOOTHING * diff + 360f) % 360f;
         }
         return smoothedAzimuth;
     }
 
-    private Bitmap drawCompass(float azimuth, boolean black) {
-        int size = 512;
-        Bitmap bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(bmp);
-        if (black) {
-            // 黑底版：不透明黑色圆角卡片背景
-            Paint bg = new Paint();
-            bg.setColor(Color.BLACK);
-            bg.setAntiAlias(true);
-            canvas.drawRoundRect(0, 0, size, size, 72f, 72f, bg);
-        }
-        // 透明版：不填充背景
-
-        float cx = size / 2f;
-        float cy = size / 2f;
-        float dialCy = size / 2f; // 旋转中心 = 组件正中心 (256,256)
-
-        // N / E / S / W 标签
-        Paint labelPaint = new Paint();
-        labelPaint.setColor(Color.WHITE);
-        labelPaint.setTypeface(ndotTypeface);
-        labelPaint.setTextSize(56f);
-        labelPaint.setTextAlign(Paint.Align.CENTER);
-        labelPaint.setAntiAlias(true);
-
-        // 测量各字母字形边界，让 N/S/W/E 的「字形边缘」到组件边缘距离统一为 edge（30px）。
-        // 注意 drawText 的 y 是基线（字形向上延伸），x（CENTER 对齐）是字形中心。
-        float edge = 30f;
-        android.graphics.Rect bN = new android.graphics.Rect();
-        android.graphics.Rect bS = new android.graphics.Rect();
-        android.graphics.Rect bW = new android.graphics.Rect();
-        android.graphics.Rect bE = new android.graphics.Rect();
-        labelPaint.getTextBounds("N", 0, 1, bN);
-        labelPaint.getTextBounds("S", 0, 1, bS);
-        labelPaint.getTextBounds("W", 0, 1, bW);
-        labelPaint.getTextBounds("E", 0, 1, bE);
-
-        // N（顶）：字形顶部距顶 edge
-        canvas.drawText("N", cx, edge - bN.top, labelPaint);
-        // S（底）：字形底部距底 edge
-        canvas.drawText("S", cx, size - edge - bS.bottom, labelPaint);
-        // W（左）：字形左边距左 edge，垂直居中
-        canvas.drawText("W", edge + bW.width() / 2f, cy - (bW.top + bW.bottom) / 2f, labelPaint);
-        // E（右）：字形右边距右 edge，垂直居中
-        canvas.drawText("E", size - edge - bE.width() / 2f, cy - (bE.top + bE.bottom) / 2f, labelPaint);
-
-        // 点阵箭头（旋转指向方向，绕表盘中心）
-        canvas.save();
-        canvas.rotate(azimuth, cx, dialCy);
-        drawDotArrow(canvas, cx, dialCy);
-        canvas.restore();
-
-        // 角度 + 经纬度 合并成一行
-        Paint infoPaint = new Paint();
-        infoPaint.setColor(Color.WHITE);
-        infoPaint.setTypeface(ndotTypeface);
-        infoPaint.setTextSize(34f);
-        infoPaint.setTextAlign(Paint.Align.CENTER);
-        infoPaint.setAntiAlias(true);
-
-        String latStr = Double.isNaN(latitude) ? "--.--N" : String.format(Locale.US, "%.2fN", latitude);
-        String lonStr = Double.isNaN(longitude) ? "--.--E" : String.format(Locale.US, "%.2fE", longitude);
-        String info = Math.round(azimuth) + "  " + latStr + "  " + lonStr;
-        canvas.drawText(info, cx, size - 140f, infoPaint);
-
-        return bmp;
+    private float angleDistance(float first, float second) {
+        if (Float.isNaN(second)) return Float.MAX_VALUE;
+        float diff = Math.abs(first - second) % 360f;
+        return Math.min(diff, 360f - diff);
     }
 
-    private void drawDotArrow(Canvas canvas, float cx, float cy) {
+    private void updateWidgets(float azimuth, String status) {
+        AppWidgetManager manager = AppWidgetManager.getInstance(this);
+        int[] ids = manager.getAppWidgetIds(
+                new ComponentName(this, CompassBlackWidgetProvider.class));
+        if (ids.length == 0) {
+            stopSelf();
+            return;
+        }
+
+        Bitmap content = nextFrame(azimuth, status);
+        PendingIntent compassIntent = compassPendingIntent();
+        for (int id : ids) {
+            RemoteViews views = new RemoteViews(getPackageName(), R.layout.widget_layout);
+            views.setImageViewBitmap(R.id.background_matrix, matrixBitmap);
+            views.setImageViewBitmap(R.id.compass_content, content);
+            if (compassIntent != null) {
+                views.setOnClickPendingIntent(R.id.click_target, compassIntent);
+            }
+            manager.updateAppWidget(id, views);
+        }
+    }
+
+    private Bitmap nextFrame(float azimuth, String status) {
+        frameBufferIndex = (frameBufferIndex + 1) % frameBuffers.length;
+        Bitmap bitmap = frameBuffers[frameBufferIndex];
+        bitmap.eraseColor(Color.TRANSPARENT);
+        Canvas canvas = new Canvas(bitmap);
+
+        float center = SIZE / 2f;
+        Paint labelPaint = textPaint(58f, Color.WHITE);
+        drawCenteredGlyph(canvas, "N", center, 42f, Edge.TOP, labelPaint);
+        drawCenteredGlyph(canvas, "S", center, SIZE - 42f, Edge.BOTTOM, labelPaint);
+        drawCenteredGlyph(canvas, "W", 42f, center, Edge.LEFT, labelPaint);
+        drawCenteredGlyph(canvas, "E", SIZE - 42f, center, Edge.RIGHT, labelPaint);
+
+        if (!Float.isNaN(azimuth)) {
+            canvas.save();
+            canvas.rotate(azimuth, center, center);
+            drawDotArrow(canvas, center, center);
+            canvas.restore();
+        } else {
+            drawIdleMark(canvas, center, center);
+        }
+
+        Paint degreePaint = textPaint(36f, Color.WHITE);
+        boolean directionStatus = isDirection(status);
+        String degree = Float.isNaN(azimuth)
+                ? "---" : String.format(Locale.US, "%03d", Math.round(azimuth) % 360);
+        String degreeLine = directionStatus ? degree + " " + status : degree;
+        drawPixelCenteredText(canvas, degreeLine, center, SIZE - 120f, degreePaint);
+
+        if (!directionStatus) {
+            Paint statusPaint = textPaint(22f,
+                    "CALIBRATE".equals(status) ? Color.rgb(255, 55, 65) : Color.LTGRAY);
+            drawPixelCenteredText(canvas, status, center, SIZE - 82f, statusPaint);
+        }
+        return bitmap;
+    }
+
+    private Bitmap drawMatrix() {
+        Bitmap bitmap = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+        Paint matrixPaint = new Paint();
+        matrixPaint.setAntiAlias(false);
+        float cell = 24f;
+        int columns = (int) Math.ceil(SIZE / cell);
+        int rows = (int) Math.ceil(SIZE / cell);
+        for (int row = 0; row < rows; row++) {
+            for (int column = 0; column < columns; column++) {
+                int alpha = 7 + ((row * 11 + column * 7) % 4) * 3;
+                boolean accent = (row * 17 + column * 29) % 37 == 0;
+                matrixPaint.setColor(accent
+                        ? Color.argb(24, 255, 45, 45)
+                        : Color.argb(alpha, 255, 255, 255));
+                canvas.drawRect(column * cell, row * cell,
+                        Math.min(SIZE, (column + 1) * cell),
+                        Math.min(SIZE, (row + 1) * cell), matrixPaint);
+            }
+        }
+        return bitmap;
+    }
+
+    private Paint textPaint(float size, int color) {
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        paint.setTypeface(dotoTypeface);
+        paint.setTextSize(size);
+        paint.setColor(color);
+        paint.setTextAlign(Paint.Align.LEFT);
+        return paint;
+    }
+
+    private void drawPixelCenteredText(Canvas canvas, String text, float centerX,
+                                       float baseline, Paint paint) {
+        Rect bounds = new Rect();
+        paint.getTextBounds(text, 0, text.length(), bounds);
+        float originX = centerX - (bounds.left + bounds.right) / 2f;
+        canvas.drawText(text, originX, baseline, paint);
+    }
+
+    private enum Edge { TOP, BOTTOM, LEFT, RIGHT }
+
+    private void drawCenteredGlyph(Canvas canvas, String glyph, float anchorX, float anchorY,
+                                   Edge edge, Paint paint) {
+        Rect bounds = new Rect();
+        paint.getTextBounds(glyph, 0, glyph.length(), bounds);
+        float x;
+        float baseline;
+        if (edge == Edge.TOP) {
+            x = anchorX - (bounds.left + bounds.right) / 2f;
+            baseline = anchorY - bounds.top;
+        } else if (edge == Edge.BOTTOM) {
+            x = anchorX - (bounds.left + bounds.right) / 2f;
+            baseline = anchorY - bounds.bottom;
+        } else if (edge == Edge.LEFT) {
+            x = anchorX - bounds.left;
+            baseline = anchorY - (bounds.top + bounds.bottom) / 2f;
+        } else {
+            x = anchorX - bounds.right;
+            baseline = anchorY - (bounds.top + bounds.bottom) / 2f;
+        }
+        canvas.drawText(glyph, x, baseline, paint);
+    }
+
+    private void drawDotArrow(Canvas canvas, float centerX, float centerY) {
         String[] pattern = {
-                "....X....",
-                "...XXX...",
-                "..XXXXX..",
-                ".XXXXXXX.",
-                "...XXX...",
-                "...XXX...",
-                "...XXX...",
+                "....X....", "...XXX...", "..XXXXX..", ".XXXXXXX.",
+                "...XXX...", "...XXX...", "...XXX..."
         };
-        float dotSize = 6f;
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        paint.setColor(Color.rgb(255, 45, 45));
         float gap = 17f;
-        int cols = 9;
-        int rows = pattern.length;
-        float startX = cx - (cols * gap) / 2f;
-        float startY = cy - (rows * gap) / 2f;
-
-        Paint dotPaint = new Paint();
-        dotPaint.setColor(Color.RED);
-        dotPaint.setStyle(Paint.Style.FILL);
-        dotPaint.setAntiAlias(true);
-
-        for (int r = 0; r < rows; r++) {
-            for (int c = 0; c < cols; c++) {
-                if (pattern[r].charAt(c) == 'X') {
-                    canvas.drawCircle(startX + c * gap, startY + r * gap, dotSize, dotPaint);
+        float startX = centerX - ((pattern[0].length() - 1) * gap) / 2f;
+        float startY = centerY - ((pattern.length - 1) * gap) / 2f;
+        for (int row = 0; row < pattern.length; row++) {
+            for (int column = 0; column < pattern[row].length(); column++) {
+                if (pattern[row].charAt(column) == 'X') {
+                    canvas.drawCircle(startX + column * gap, startY + row * gap,
+                            6f, paint);
                 }
             }
         }
     }
 
+    private void drawIdleMark(Canvas canvas, float centerX, float centerY) {
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        paint.setColor(Color.rgb(255, 45, 45));
+        canvas.drawCircle(centerX, centerY, 9f, paint);
+    }
+
+    private String cardinalDirection(float azimuth) {
+        String[] directions = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+        return directions[Math.round(azimuth / 45f) % directions.length];
+    }
+
+    private boolean isDirection(String status) {
+        return "N".equals(status) || "NE".equals(status) || "E".equals(status)
+                || "SE".equals(status) || "S".equals(status) || "SW".equals(status)
+                || "W".equals(status) || "NW".equals(status);
+    }
+
+    private PendingIntent compassPendingIntent() {
+        Intent launch = getPackageManager().getLaunchIntentForPackage("com.coloros.compass2");
+        if (launch == null) return null;
+        return PendingIntent.getActivity(this, 100, launch,
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+    }
+
     private Notification buildNotification() {
-        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        NotificationChannel channel = new NotificationChannel(
-                "compass", "指南针", NotificationManager.IMPORTANCE_MIN);
-        nm.createNotificationChannel(channel);
-        return new Notification.Builder(this, "compass")
-                .setContentTitle("指南针")
-                .setContentText("正在运行")
+        NotificationManager manager =
+                (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (Build.VERSION.SDK_INT >= 26) {
+            NotificationChannel channel = new NotificationChannel(
+                    "compass", "点阵指南针", NotificationManager.IMPORTANCE_MIN);
+            manager.createNotificationChannel(channel);
+        }
+        Notification.Builder builder = Build.VERSION.SDK_INT >= 26
+                ? new Notification.Builder(this, "compass")
+                : new Notification.Builder(this);
+        PendingIntent launch = compassPendingIntent();
+        builder.setContentTitle("点阵指南针")
+                .setContentText("屏幕点亮时更新方向")
                 .setSmallIcon(android.R.drawable.ic_menu_compass)
-                .setOngoing(true)
-                .build();
+                .setOngoing(true);
+        if (launch != null) builder.setContentIntent(launch);
+        return builder.build();
+    }
+
+    private Typeface loadTypeface(String asset) {
+        try {
+            return Typeface.createFromAsset(getAssets(), asset);
+        } catch (Exception ignored) {
+            return Typeface.DEFAULT;
+        }
     }
 
     @Override
     public void onAccuracyChanged(Sensor sensor, int accuracy) {
+        if (sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD) {
+            magneticAccuracy = accuracy;
+        }
     }
 
     @Override
     public void onDestroy() {
-        if (sensorManager != null) {
-            sensorManager.unregisterListener(this);
+        stopSensors();
+        if (receiverRegistered) {
+            unregisterReceiver(screenReceiver);
+            receiverRegistered = false;
         }
-        if (locationManager != null) {
-            locationManager.removeUpdates(locationListener);
+        for (Bitmap bitmap : frameBuffers) {
+            if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
         }
+        if (matrixBitmap != null && !matrixBitmap.isRecycled()) matrixBitmap.recycle();
         super.onDestroy();
     }
 

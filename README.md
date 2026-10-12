@@ -1,125 +1,89 @@
 # Nothing Compass Widget 🧭
 
-一个 **Nothing 风格（Ndot 点阵）的 Android 指南针桌面小组件**，从零手写、纯 Java 实现，不依赖 Gradle / Android Studio。
+一个轻量的 Nothing 风格 Android 指南针桌面小组件。纯 Java 实现，不依赖 Gradle 或 Android Studio。
 
-透明背景，点阵字体 + 点阵箭头，实时显示方向、角度和经纬度，点击可跳转到系统指南针 App。
+v2 只保留黑色圆角卡片版本，使用 Doto 点阵字体、静态无缝方格背景和红色点阵方向箭头。组件不需要定位权限，显示的是磁北方向。
 
-## ✨ 功能特性
+## 功能
 
-- **1×1 桌面小组件**，透明背景，融入任意壁纸
-- **Ndot 点阵字体**（Nothing 风格）渲染 N / E / S / W 方位和数字
-- **点阵箭头**（红色圆点拼成），实时指向磁北
-- **平滑滤波**，指针不抖（低通滤波 + 360° 回绕处理）
-- **实时显示角度 + 经纬度**（`纬度N 经度E`）
-- **点击组件**跳转到系统自带指南针 App
+- 黑色圆角卡片，适配不同 Launcher 网格和组件宽高比
+- Doto 700 点阵字体显示 N / E / S / W、角度与方向
+- 加速度计与磁力计组合计算方向，并处理 360° 回绕
+- 根据屏幕旋转重映射传感器坐标
+- 磁场精度不可靠时显示 `CALIBRATE`
+- 屏幕熄灭后停止传感器，亮屏后自动恢复
+- 点击组件可打开 ColorOS 指南针（已安装时）
+- 不申请定位、后台定位、存储或电话权限
 
-## 🖼️ 预览
+## 尺寸适配
 
-![组件演示](preview.gif)
+组件使用三层结构：
 
-```
-        N
-   W    ▲    E
-        ·（点阵箭头随方向旋转）
-   45  28.23N  121.00E
-        S
-```
+1. XML 黑色圆角底板填满 Launcher 分配区域；
+2. 静态方格纹理使用 `centerCrop` 等比铺设；
+3. 512×512 指南针内容使用 `fitCenter` 等比显示。
 
-## 📦 直接安装
+任何一层都不使用 `fitXY`，所以桌面网格变化只会产生安全留白或裁切，不会把圆形、文字和箭头拉伸成椭圆。
 
-仓库根目录的 [`compass-widget.apk`](./compass-widget.apk) 是已编译好的 APK（arm64 通用，签名已包含），可直接：
+## 性能策略
+
+- 传感器保持较高采样频率，用于角度平滑；
+- RemoteViews 最多每 200 ms 更新一次，即最高约 5 FPS；
+- 角度变化小于 0.7° 时跳过重复画面，每 1.5 秒才强制同步一次；
+- 一帧只绘制一次，所有组件实例共享同一张内容位图；
+- 使用两个 512×512 Bitmap 交替绘制，避免每个传感器事件重新分配大图；
+- 方格背景只生成一次并缓存；
+- 屏幕关闭时注销传感器监听。
+
+这些限制用于解决旧版高频创建 Bitmap、频繁 Binder 传输导致的卡顿和偶发无响应。
+
+## 安装
+
+仓库根目录的 `compass-widget.apk` 是当前稳定 APK。v2 包名为 `com.unimend.nothingcompass`，可与旧版 `com.example.compasswidget2` 共存：
 
 ```bash
-adb install compass-widget.apk
+adb install -r compass-widget.apk
 ```
 
-安装后：长按桌面空白 → 小组件 → 找到 **「指南针·透明」** → 拖到桌面。
+安装后：长按桌面空白 → 小组件 → 找到“点阵指南针” → 拖到桌面。确认新版稳定后，可以手动移除旧版组件和旧应用。
 
-## 🔨 从源码构建
+## 构建
 
-**环境要求：**
+macOS：
 
-- JDK 17（`javac`、`keytool`、`jar`）
-- Android SDK `build-tools 34.0.0`（`aapt2`、`d8`、`zipalign`、`apksigner`）
-- Android SDK `platforms/android-34`（`android.jar`）
+```bash
+./build.sh
+```
 
-**一键构建（Windows PowerShell）：**
+Windows PowerShell：
 
 ```powershell
 .\build.ps1
 ```
 
-构建产物在 `build/compasswidget2.apk`。
+构建依赖 JDK 17、Android SDK Build Tools 34.0.0 和 Android 34 Platform。macOS 脚本默认复用 Unity 2022.3.52f1c1 的 Android 工具链。
 
-### 手动构建步骤
+构建产物：`build/compasswidget2.apk`
 
-本项目**刻意不用 Gradle**，只用 Android SDK 自带工具，构建流程完全透明：
+APK 元数据：
 
-```bash
-BT="你的SDK路径/build-tools/34.0.0"
-PLATFORM="你的SDK路径/platforms/android-34/android.jar"
+- 包名：`com.unimend.nothingcompass`
+- versionName：`2.0.0`
+- versionCode：`1`
+- minSdk：23
+- targetSdk：31
 
-# 1. 编译资源
-$BT/aapt2.exe compile --dir res -o build/compiled/res.zip
+## 代码结构
 
-# 2. 链接（生成 R.java + 基础 APK，打包 assets 字体）
-$BT/aapt2.exe link -o build/base.apk -I $PLATFORM --manifest AndroidManifest.xml \
-  -R build/compiled/res.zip --java build/gen -A assets --auto-add-overlay
-
-# 3. 编译 Java
-javac -encoding UTF-8 -classpath $PLATFORM -d build/classes \
-  $(find src -name '*.java') build/gen/com/example/compasswidget2/R.java
-
-# 4. 转 dex
-$BT/d8.bat --release --lib $PLATFORM --output build/dex \
-  $(find build/classes -name '*.class')
-
-# 5. 打包 dex 进 APK
-cp build/base.apk build/unsigned.apk
-(cd build/dex && jar -uf ../unsigned.apk classes.dex)
-
-# 6. 对齐 + 签名（首次需先生成 keystore）
-$BT/zipalign.exe -f 4 build/unsigned.apk build/aligned.apk
-$BT/apksigner.bat sign --ks build/debug.keystore --ks-pass pass:android \
-  --key-pass pass:android --ks-key-alias androiddebugkey \
-  --out build/compasswidget2.apk build/aligned.apk
-```
-
-## 🛠️ 技术细节
-
-| 模块 | 说明 |
+| 文件 | 作用 |
 |---|---|
-| `CompassService.java` | 前台服务：读磁力计 + 加速度计算方位角，画点阵位图，更新组件 |
-| `CompassWidgetProvider.java` | 组件生命周期：添加时启动服务，移除时停止 |
-| `assets/ndot.otf` | Ndot 点阵字体（Nothing 风格） |
-| 平滑算法 | 低通滤波（α=0.12）+ 角度回绕处理，消除抖动 |
-| 点阵箭头 | 9×7 圆点矩阵拼成的箭头，`canvas.rotate` 旋转指向磁北 |
+| `CompassService.java` | 传感器、平滑、节流、屏幕生命周期、绘制与组件更新 |
+| `CompassBlackWidgetProvider.java` | 单一黑底组件生命周期 |
+| `widget_layout.xml` | 底板、纹理、等比内容和点击层 |
+| `widget_info_black.xml` | Launcher 尺寸和调整规则 |
+| `assets/doto.ttf` | Doto 700 英文点阵字体 |
+| `assets/DOTO-OFL.txt` | Doto 的 SIL OFL 1.1 许可证 |
 
-## ⚠️ 定位说明（重要）
+## 字体与许可
 
-组件会显示经纬度，需要**定位权限**。在部分 ColorOS / OPLUS 机型上，系统会拦截**后台应用**的定位请求（`OplusPermissionInterceptPolicy: not foreground app, reject it`），导致经纬度显示 `--.--`。
-
-**解决（需要 root）：**
-
-```bash
-# 授予定位权限
-adb shell su -c 'pm grant com.example.compasswidget2 android.permission.ACCESS_FINE_LOCATION'
-adb shell su -c 'pm grant com.example.compasswidget2 android.permission.ACCESS_COARSE_LOCATION'
-
-# 关闭 OPlus 后台权限拦截（关键！否则后台组件拿不到定位）
-adb shell su -c 'setprop persist.sys.permission.enable false'
-```
-
-> `persist.sys.permission.enable=false` 是 persist 属性，重启后依然生效；副作用是其它后台应用也能访问权限（对去广告、深度定制的机器通常反而是好事）。恢复：`setprop persist.sys.permission.enable true`。
-
-## 📄 字体来源
-
-`assets/ndot.otf`（NDot57Caps）提取自 [rjwarrier/KWGT-Widgets](https://github.com/rjwarrier/KWGT-Widgets) 的 Nothing 风格预设（`.kwgt` 内的 `fonts/NDot57Caps.otf`）。该字体为 Nothing 风格的点阵字体，版权归原作者 / Nothing 所有，仅供学习使用。
-
-## 📄 许可
-
-MIT License，详见 [LICENSE](./LICENSE)。
-
----
-
-*一个在 OnePlus 7T Pro（ColorOS 12.1 / Android 12，root）上从零定制、手写编译的 Nothing 风格组件。*
+Doto 来自 [Google Fonts / Doto](https://github.com/google/fonts/tree/main/ofl/doto)，采用 SIL Open Font License 1.1。项目代码使用 MIT License。
