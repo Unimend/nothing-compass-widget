@@ -386,24 +386,7 @@ public class CompassService extends Service implements SensorEventListener {
 
     private Bitmap drawMatrix() {
         Bitmap bitmap = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(bitmap);
-        Paint matrixPaint = new Paint();
-        matrixPaint.setAntiAlias(false);
-        float cell = 24f;
-        int columns = (int) Math.ceil(SIZE / cell);
-        int rows = (int) Math.ceil(SIZE / cell);
-        for (int row = 0; row < rows; row++) {
-            for (int column = 0; column < columns; column++) {
-                int alpha = 7 + ((row * 11 + column * 7) % 4) * 3;
-                boolean accent = (row * 17 + column * 29) % 37 == 0;
-                matrixPaint.setColor(accent
-                        ? Color.argb(24, 255, 45, 45)
-                        : Color.argb(alpha, 255, 255, 255));
-                canvas.drawRect(column * cell, row * cell,
-                        Math.min(SIZE, (column + 1) * cell),
-                        Math.min(SIZE, (row + 1) * cell), matrixPaint);
-            }
-        }
+        bitmap.eraseColor(Color.BLACK);
         return bitmap;
     }
 

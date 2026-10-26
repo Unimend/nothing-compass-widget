@@ -2,7 +2,7 @@
 
 一个轻量的 Nothing 风格 Android 指南针桌面小组件。纯 Java 实现，不依赖 Gradle 或 Android Studio。
 
-v2 只保留黑色圆角卡片版本，使用 Doto 点阵字体、静态无缝方格背景和红色点阵方向箭头，并显示低频读取的最近经纬度。
+v2 只保留纯黑圆角卡片版本，使用 Doto 点阵字体和红色点阵方向箭头，并显示低频读取的最近经纬度。
 
 ![指南针组件实机截图](screenshots/widget.png)
 
@@ -23,7 +23,7 @@ v2 只保留黑色圆角卡片版本，使用 Doto 点阵字体、静态无缝�
 
 当前以 OnePlus 7T Pro、OPlus Launcher `3×5` 为主验收基准。该网格的 1×1 宿主高度比宽度约多 10 个物理像素，因此卡片使用左右 9dp、上下 10.5dp 的固定适配边距，将可见外框校正为正方形。这是当前设备与网格的视觉适配值，不是 Android 通用常量。
 
-外框使用 14dp XML 圆角；方格背景使用 `centerCrop`并被外框统一裁切；罗盘使用独立 512×512 透明坐标系和 `fitCenter`，内部罗盘、文字和箭头不会变形。
+外框使用 14dp XML 圆角；纯黑背景与外框使用同一边界裁切；罗盘使用独立 512×512 透明坐标系和 `fitCenter`，内部罗盘、文字和箭头不会变形。
 
 不使用 `fitXY` 或单侧 margin：四边对称边距使组件放在桌面左侧和右侧时都遵守同一对齐规则。
 
@@ -34,7 +34,7 @@ v2 只保留黑色圆角卡片版本，使用 Doto 点阵字体、静态无缝�
 - 角度变化小于 0.25° 时跳过重复画面，每 1 秒强制同步一次；
 - 一帧只绘制一次，所有组件实例共享同一张内容位图；
 - 使用两个 512×512 Bitmap 交替绘制，避免每个传感器事件重新分配大图；
-- 方格背景只生成一次并缓存；
+- 纯黑背景只生成一次并缓存；
 - 屏幕关闭时注销传感器监听。
 
 这些限制用于解决旧版高频创建 Bitmap、频繁 Binder 传输导致的卡顿和偶发无响应。
@@ -70,8 +70,8 @@ Windows PowerShell：
 APK 元数据：
 
 - 包名：`com.unimend.nothingcompass`
-- versionName：`2.4.0`
-- versionCode：`7`
+- versionName：`2.4.1`
+- versionCode：`8`
 - minSdk：23
 - targetSdk：31
 
@@ -81,7 +81,7 @@ APK 元数据：
 |---|---|
 | `CompassService.java` | 传感器、平滑、节流、屏幕生命周期、绘制与组件更新 |
 | `CompassBlackWidgetProvider.java` | 单一黑底组件生命周期 |
-| `widget_layout.xml` | 底板、纹理、等比内容和点击层 |
+| `widget_layout.xml` | 纯黑底板、等比内容和点击层 |
 | `widget_info_black.xml` | Launcher 尺寸和调整规则 |
 | `assets/doto.ttf` | Doto 700 英文点阵字体 |
 | `assets/DOTO-OFL.txt` | Doto 的 SIL OFL 1.1 许可证 |
